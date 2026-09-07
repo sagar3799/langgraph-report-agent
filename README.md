@@ -8,6 +8,12 @@ tool-use correctness and confidence calibration, not just "did it produce text."
 Built with free-tier tools only: Google Gemini (free API tier), Qdrant Cloud (free 1GB
 cluster), and DuckDuckGo search (no API key required).
 
+The chat UI supports attaching files directly in the message box (like ChatGPT) — `.txt`,
+`.md`, `.pdf`, `.pptx`, and `.docx` are extracted, chunked, embedded, and added to the
+Qdrant knowledge base immediately, so a newly uploaded doc is queryable in the same
+conversation. Only the extracted text is kept locally (gzip-compressed under `uploads/`)
+— not the original binary — since retrieval never touches the original file format.
+
 ## Architecture
 
 ```mermaid
@@ -90,11 +96,13 @@ src/agent/
   nodes.py         # retrieve / grade / call_tool / write_report node functions
   graph.py         # StateGraph wiring + conditional edges
   llm.py           # Gemini chat model + structured-output retry-once helper
-  retrieval/       # Qdrant client, embeddings, upsert/search
+  retrieval/       # Qdrant client, embeddings, upsert/search/list_sources
   tools/           # calculator (AST-based, no eval()), web_search (DuckDuckGo)
+  ingestion.py     # txt/md/pdf/pptx/docx -> extracted text -> chunks -> Qdrant
   app.py           # FastAPI: POST /ask
-streamlit_app.py   # chat-style UI (the demo front end)
-scripts/ingest_docs.py  # chunk docs/*.md and upsert into Qdrant
+streamlit_app.py   # chat UI: ask questions, attach files to grow the knowledge base
+scripts/ingest_docs.py  # bulk-ingest everything already in docs/
+uploads/           # gzip-compressed extracted text from chat uploads (gitignored)
 eval/
   questions.json   # 12 test questions (easy/hard/edge)
   run_eval.py      # scores tool-use + confidence, writes results.csv/.md
