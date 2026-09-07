@@ -10,3 +10,4 @@ build/
 qdrant_storage/
 .vscode/
 .claude/
+uploads/

@@ -62,6 +62,29 @@ def upsert_documents(chunks: list[str], sources: list[str]) -> int:
     return len(points)
 
 
+def list_sources() -> list[str]:
+    """Return the distinct source filenames currently stored, for display in the UI."""
+    client = get_qdrant_client()
+    collection = get_collection_name()
+    if not client.collection_exists(collection):
+        return []
+
+    sources: set[str] = set()
+    offset = None
+    while True:
+        points, offset = client.scroll(
+            collection_name=collection,
+            limit=200,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        sources.update(p.payload["source"] for p in points if p.payload and "source" in p.payload)
+        if offset is None:
+            break
+    return sorted(sources)
+
+
 def search(query: str, top_k: int = 4) -> list[dict]:
     """Return top_k matches as [{"text", "source", "score"}, ...]."""
     client = get_qdrant_client()

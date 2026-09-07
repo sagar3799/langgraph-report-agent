@@ -15,6 +15,9 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "streamlit>=1.38.0",
+    "pypdf>=5.0.0",
+    "python-pptx>=1.0.0",
+    "python-docx>=1.1.0",
 ]
 
 [project.optional-dependencies]
