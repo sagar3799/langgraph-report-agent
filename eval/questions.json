@@ -1,0 +1,86 @@
+[
+  {
+    "id": "easy-1",
+    "category": "easy",
+    "question": "What is the monthly price of the Aurora Pro tier?",
+    "expected_tool": null,
+    "expected_keywords": ["$12", "12"]
+  },
+  {
+    "id": "easy-2",
+    "category": "easy",
+    "question": "What encryption algorithm does Aurora use for data at rest?",
+    "expected_tool": null,
+    "expected_keywords": ["AES-256", "AES"]
+  },
+  {
+    "id": "easy-3",
+    "category": "easy",
+    "question": "What is the maximum single file size on the Aurora Pro tier?",
+    "expected_tool": null,
+    "expected_keywords": ["5 GB", "5GB"]
+  },
+  {
+    "id": "easy-4",
+    "category": "easy",
+    "question": "Does Aurora support on-premises or air-gapped deployment?",
+    "expected_tool": null,
+    "expected_keywords": ["not", "no", "does not"]
+  },
+  {
+    "id": "easy-5",
+    "category": "easy",
+    "question": "What compliance certification does Aurora currently hold?",
+    "expected_tool": null,
+    "expected_keywords": ["SOC 2"]
+  },
+  {
+    "id": "hard-1",
+    "category": "hard",
+    "question": "In what year was the Python programming language first released?",
+    "expected_tool": "web_search",
+    "expected_keywords": ["1991"]
+  },
+  {
+    "id": "hard-2",
+    "category": "hard",
+    "question": "Which company originally created the LangChain and LangGraph libraries?",
+    "expected_tool": "web_search",
+    "expected_keywords": ["LangChain"]
+  },
+  {
+    "id": "hard-3",
+    "category": "hard",
+    "question": "What is the boiling point of water in Celsius at sea level?",
+    "expected_tool": "web_search",
+    "expected_keywords": ["100"]
+  },
+  {
+    "id": "hard-4",
+    "category": "hard",
+    "question": "If Aurora Pro egress overage is billed at $0.05/GB, how much would 40GB of overage cost?",
+    "expected_tool": "calculator",
+    "expected_keywords": ["2"]
+  },
+  {
+    "id": "edge-1",
+    "category": "edge",
+    "question": "What is Aurora's per-GB pricing for its 'Lunar' data center tier?",
+    "expected_tool": null,
+    "expected_keywords": []
+  },
+  {
+    "id": "edge-2",
+    "category": "edge",
+    "question": "What is Aurora Cloud Storage's stock ticker symbol?",
+    "expected_tool": null,
+    "expected_keywords": []
+  },
+  {
+    "id": "edge-3",
+    "category": "edge",
+    "question": "Explain the meaning of life in the context of Aurora's SLA.",
+    "expected_tool": null,
+    "expected_keywords": []
+  }
+]
