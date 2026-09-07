@@ -15,6 +15,7 @@ load_dotenv()
 
 from agent.graph import build_graph  # noqa: E402
 from agent.ingestion import (  # noqa: E402
+    MAX_CHUNKS_PER_FILE,
     SUPPORTED_EXTENSIONS,
     EmptyDocumentError,
     UnsupportedFileTypeError,
@@ -87,13 +88,37 @@ def render_report(report: Report, tool_calls: list[str], loop_count: int) -> Non
         st.caption(f"**Tools called:** {label} · **loops:** {loop_count}")
 
 
+def _format_bytes(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f}{unit}" if unit == "B" else f"{n:.1f}{unit}"
+        n /= 1024
+    return f"{n:.1f}TB"
+
+
 def ingest_files(files) -> list[str]:
     """Ingest each uploaded file, returning one status line per file."""
     lines = []
     for f in files:
         try:
             result = ingest_uploaded_file(f.name, f.getvalue())
-            lines.append(f"✅ **{f.name}** — {result['chunks']} chunks added to the knowledge base")
+            original = _format_bytes(result["original_bytes"])
+            archived = _format_bytes(result["archived_bytes"])
+            ratio = (
+                result["original_bytes"] / result["archived_bytes"]
+                if result["archived_bytes"]
+                else 1
+            )
+            line = (
+                f"✅ **{f.name}** — {result['chunks']} chunks added · "
+                f"stored as {archived} (down from {original}, {ratio:.1f}x smaller)"
+            )
+            if result["truncated"]:
+                line += (
+                    f"  \n&nbsp;&nbsp;⚠️ only the first {MAX_CHUNKS_PER_FILE} of "
+                    f"{result['total_chunks_found']} chunks were embedded (free-tier quota guard)"
+                )
+            lines.append(line)
         except (UnsupportedFileTypeError, EmptyDocumentError) as exc:
             lines.append(f"⚠️ **{f.name}** — {exc}")
         except Exception as exc:  # noqa: BLE001 - surface any extraction/network failure to the user
@@ -147,7 +172,7 @@ submission = st.chat_input(
     "Ask a question, or attach files to add to the knowledge base...",
     accept_file="multiple",
     file_type=list(SUPPORTED_EXTENSIONS),
-    max_upload_size=20,
+    max_upload_size=200,
 )
 
 if submission:

@@ -14,7 +14,8 @@ EMBEDDING_DIM = 768  # gemini-embedding-001 defaults to 3072; truncated via outp
 def get_qdrant_client() -> QdrantClient:
     url = os.environ.get("QDRANT_URL", "http://localhost:6333")
     api_key = os.environ.get("QDRANT_API_KEY") or None
-    return QdrantClient(url=url, api_key=api_key)
+    # Default client timeout (5s) is too short for larger batch upserts over a real network.
+    return QdrantClient(url=url, api_key=api_key, timeout=60)
 
 
 def get_collection_name() -> str:
@@ -38,28 +39,39 @@ def ensure_collection(client: QdrantClient, collection: str) -> None:
         )
 
 
+EMBED_BATCH_SIZE = 32  # keeps each Gemini embed call and Qdrant upsert small, not one giant request
+
+
 def upsert_documents(chunks: list[str], sources: list[str]) -> int:
     """Embed and upsert `chunks` (parallel to `sources`) into the collection. Returns count."""
     if len(chunks) != len(sources):
         raise ValueError("chunks and sources must be the same length")
+    if not chunks:
+        return 0
 
     client = get_qdrant_client()
     collection = get_collection_name()
     ensure_collection(client, collection)
-
     embedder = get_embedder()
-    vectors = embedder.embed_documents(chunks)
 
-    points = [
-        PointStruct(
-            id=str(uuid.uuid4()),
-            vector=vector,
-            payload={"text": chunk, "source": source},
-        )
-        for vector, chunk, source in zip(vectors, chunks, sources, strict=True)
-    ]
-    client.upsert(collection_name=collection, points=points)
-    return len(points)
+    total = 0
+    for start in range(0, len(chunks), EMBED_BATCH_SIZE):
+        batch_chunks = chunks[start : start + EMBED_BATCH_SIZE]
+        batch_sources = sources[start : start + EMBED_BATCH_SIZE]
+        vectors = embedder.embed_documents(batch_chunks)
+
+        points = [
+            PointStruct(
+                id=str(uuid.uuid4()),
+                vector=vector,
+                payload={"text": chunk, "source": source},
+            )
+            for vector, chunk, source in zip(vectors, batch_chunks, batch_sources, strict=True)
+        ]
+        client.upsert(collection_name=collection, points=points)
+        total += len(points)
+
+    return total
 
 
 def list_sources() -> list[str]:

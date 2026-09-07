@@ -14,6 +14,7 @@ from agent.retrieval.qdrant_store import upsert_documents
 
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
+MAX_CHUNKS_PER_FILE = 500  # ~400K chars; a free-tier Gemini key can't afford unbounded embed calls
 UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 
 SUPPORTED_EXTENSIONS = ("txt", "md", "pdf", "pptx", "docx")
@@ -95,12 +96,16 @@ def ingest_uploaded_file(filename: str, data: bytes) -> dict:
         raise EmptyDocumentError(f"No extractable text found in {filename}")
 
     archive_path = save_compressed_text(filename, text)
-    chunks = chunk_text(text)
+    all_chunks = chunk_text(text)
+    truncated = len(all_chunks) > MAX_CHUNKS_PER_FILE
+    chunks = all_chunks[:MAX_CHUNKS_PER_FILE]
     chunk_count = upsert_documents(chunks, [filename] * len(chunks))
 
     return {
         "filename": filename,
         "chunks": chunk_count,
+        "total_chunks_found": len(all_chunks),
+        "truncated": truncated,
         "original_bytes": len(data),
         "archived_bytes": archive_path.stat().st_size,
     }
