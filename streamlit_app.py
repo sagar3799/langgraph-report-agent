@@ -5,6 +5,7 @@ Run with: streamlit run streamlit_app.py
 """
 
 import sys
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -15,7 +16,7 @@ load_dotenv()
 
 from agent.graph import build_graph  # noqa: E402
 from agent.ingestion import (  # noqa: E402
-    MAX_CHUNKS_PER_FILE,
+    MAX_CHUNKS_INTERACTIVE,
     SUPPORTED_EXTENSIONS,
     EmptyDocumentError,
     UnsupportedFileTypeError,
@@ -105,11 +106,30 @@ def _format_bytes(n: int) -> str:
 
 
 def ingest_files(files) -> list[str]:
-    """Ingest each uploaded file, returning one status line per file."""
+    """Ingest each uploaded file, showing a live progress bar (embedding is CPU-bound and
+    can take a while on a large file), and return one status line per file."""
     lines = []
     for f in files:
+        progress_bar = st.progress(0.0)
+        status_text = st.empty()
+        start_time = time.monotonic()
+
+        def on_progress(
+            done: int,
+            total: int,
+            _start=start_time,
+            _bar=progress_bar,
+            _status=status_text,
+            _name=f.name,
+        ) -> None:
+            elapsed = time.monotonic() - _start
+            rate = done / elapsed if elapsed > 0 else 0
+            remaining = (total - done) / rate if rate > 0 else 0
+            _bar.progress(done / total)
+            _status.caption(f"Embedding {_name}: {done}/{total} chunks (~{remaining:.0f}s left)")
+
         try:
-            result = ingest_uploaded_file(f.name, f.getvalue())
+            result = ingest_uploaded_file(f.name, f.getvalue(), progress_callback=on_progress)
             original = _format_bytes(result["original_bytes"])
             archived = _format_bytes(result["archived_bytes"])
             ratio = (
@@ -123,14 +143,20 @@ def ingest_files(files) -> list[str]:
             )
             if result["truncated"]:
                 line += (
-                    f"  \n&nbsp;&nbsp;⚠️ only the first {MAX_CHUNKS_PER_FILE} of "
-                    f"{result['total_chunks_found']} chunks were embedded (free-tier quota guard)"
+                    f"  \n&nbsp;&nbsp;⚠️ only the first {MAX_CHUNKS_INTERACTIVE} of "
+                    f"{result['total_chunks_found']} chunks were embedded (this file is large "
+                    "enough that full indexing would take several minutes -- for full coverage, "
+                    "put it in `docs/` and run `python scripts/ingest_docs.py` instead, which "
+                    "has no cap)"
                 )
             lines.append(line)
         except (UnsupportedFileTypeError, EmptyDocumentError) as exc:
             lines.append(f"⚠️ **{f.name}** — {exc}")
         except Exception as exc:  # noqa: BLE001 - surface any extraction/network failure to the user
             lines.append(f"❌ **{f.name}** — failed: {exc}")
+        finally:
+            progress_bar.empty()
+            status_text.empty()
     return lines
 
 

@@ -78,7 +78,7 @@ def test_ingest_uploaded_file_archives_compressed_copy_and_upserts(monkeypatch, 
     monkeypatch.setattr(ingestion, "UPLOADS_DIR", tmp_path)
     captured = {}
 
-    def fake_upsert(chunks, sources):
+    def fake_upsert(chunks, sources, progress_callback=None):
         captured["chunks"] = chunks
         captured["sources"] = sources
         return len(chunks)
@@ -94,3 +94,46 @@ def test_ingest_uploaded_file_archives_compressed_copy_and_upserts(monkeypatch, 
     assert archive.exists()
     with gzip.open(archive, "rt", encoding="utf-8") as f:
         assert f.read() == "some real content here"
+
+
+def test_ingest_uploaded_file_truncates_to_interactive_cap(monkeypatch, tmp_path):
+    monkeypatch.setattr(ingestion, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(ingestion, "chunk_text", lambda text: [f"chunk{i}" for i in range(600)])
+    monkeypatch.setattr(ingestion, "upsert_documents", lambda chunks, sources, **kw: len(chunks))
+
+    result = ingest_uploaded_file("big.txt", b"content")
+
+    assert result["truncated"] is True
+    assert result["total_chunks_found"] == 600
+    assert result["chunks"] == ingestion.MAX_CHUNKS_INTERACTIVE
+
+
+def test_ingest_uploaded_file_max_chunks_none_means_unlimited(monkeypatch, tmp_path):
+    monkeypatch.setattr(ingestion, "UPLOADS_DIR", tmp_path)
+    monkeypatch.setattr(ingestion, "chunk_text", lambda text: [f"chunk{i}" for i in range(600)])
+    monkeypatch.setattr(ingestion, "upsert_documents", lambda chunks, sources, **kw: len(chunks))
+
+    result = ingest_uploaded_file("big.txt", b"content", max_chunks=None)
+
+    assert result["truncated"] is False
+    assert result["chunks"] == 600
+
+
+def test_ingest_uploaded_file_forwards_progress_callback(monkeypatch, tmp_path):
+    monkeypatch.setattr(ingestion, "UPLOADS_DIR", tmp_path)
+    captured = {}
+
+    def fake_upsert(chunks, sources, progress_callback=None):
+        if progress_callback:
+            progress_callback(len(chunks), len(chunks))
+        return len(chunks)
+
+    monkeypatch.setattr(ingestion, "upsert_documents", fake_upsert)
+
+    def on_progress(done, total):
+        captured["done"] = done
+        captured["total"] = total
+
+    ingest_uploaded_file("notes.txt", b"some content", progress_callback=on_progress)
+
+    assert captured == {"done": 1, "total": 1}

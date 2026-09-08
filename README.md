@@ -50,6 +50,13 @@ graph TD;
 - **write_report**: writes a structured `Report` (title, summary, sections, sources,
   confidence) grounded only in what was retrieved/found.
 
+Every node logs what it did (`agent/logging_config.py`, wired into every entry point) and
+appends a line to `state["trace"]` — retrieval scores, the grading verdict and reason, tool
+calls, report confidence. The chat UI renders this as an expandable "Agent steps" panel under
+each answer, and it's included in the FastAPI response too. The pipeline isn't a black box:
+you can see whether it retrieved anything, why it decided a tool call was or wasn't needed,
+and what it actually did about it.
+
 ## Retrieval quality: chunking + reranking, not just "call an embedding API"
 
 Two changes replaced an earlier, weaker version of this pipeline:
@@ -70,6 +77,29 @@ Both the embedder (`BAAI/bge-small-en-v1.5`) and reranker (`Xenova/ms-marco-Mini
 run locally via `fastembed` (ONNX, CPU-only, no GPU needed) — a few hundred MB downloaded
 once, then zero API calls and zero rate limits for retrieval, ever. Gemini is only called
 for the grading and report-writing steps now.
+
+## Local embedding is unlimited, but not instant — two ingestion paths
+
+Trading Gemini's rate-limited embedding API for a local CPU model removes the quota ceiling,
+but introduces a real one: CPU-only embedding is roughly **linear in total text volume**,
+independent of chunk size (measured on an 8-core/16-thread Ryzen 7 laptop: ~0.175ms per
+character, whether that's chunked into 500 pieces or 5,000 — multiprocessing across cores
+only bought ~25%, not a multiple of core count, since fastembed's ONNX threading doesn't
+scale the way you'd hope for batches this size). A genuinely large document — a few
+million characters — takes single-digit minutes no matter how it's sliced.
+
+So there are two paths, matching two different situations:
+
+- **Chat upload** (attach a file in `streamlit_app.py`): capped at `MAX_CHUNKS_INTERACTIVE`
+  (500 chunks, ~1-3 minutes worst case) so one huge file can't block an interactive session
+  for 15+ minutes. A live progress bar with an ETA shows what's happening; if the file is
+  bigger than the cap, the UI says so explicitly rather than silently dropping content.
+- **Batch ingestion** (`python scripts/ingest_docs.py` on files in `docs/`): no cap
+  (`max_chunks=None`) — appropriate for a one-time terminal command you can let run for as
+  long as it needs, unlike a chat message someone is actively waiting on.
+
+If you need a large document *fully* indexed, use the batch path. Uploading it through chat
+will index its first ~500 chunks and tell you it did so.
 
 ## Failure mode handled: malformed structured output
 

@@ -29,8 +29,14 @@ def main() -> None:
         return
 
     for path in doc_paths:
-        result = ingest_uploaded_file(path.name, path.read_bytes())
-        print(f"{path.name}: {result['chunks']} chunks upserted")
+
+        def on_progress(done: int, total: int, _name: str = path.name) -> None:
+            print(f"  {_name}: {done}/{total} chunks embedded", end="\r")
+
+        result = ingest_uploaded_file(
+            path.name, path.read_bytes(), max_chunks=None, progress_callback=on_progress
+        )
+        print(f"{path.name}: {result['chunks']} chunks upserted" + " " * 20)
 
 
 if __name__ == "__main__":

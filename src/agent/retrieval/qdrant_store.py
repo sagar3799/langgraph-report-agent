@@ -10,6 +10,7 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import Callable
 
 from fastembed import TextEmbedding
 from fastembed.rerank.cross_encoder import TextCrossEncoder
@@ -21,7 +22,9 @@ logger = logging.getLogger(__name__)
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIM = 384
 RERANKER_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"
-EMBED_BATCH_SIZE = 128  # local processing, not a rate-limited API call -- larger batches are fine
+# Measured ~0.175ms/char of embedding cost on CPU regardless of batch size, so this is purely
+# about progress-update granularity (smaller batch = more frequent callback ticks), not throughput.
+EMBED_BATCH_SIZE = 32
 RETRIEVE_CANDIDATES = 15  # widen the net before reranking down to top_k
 
 _embedder: TextEmbedding | None = None
@@ -69,8 +72,17 @@ def ensure_collection(client: QdrantClient, collection: str) -> None:
         )
 
 
-def upsert_documents(chunks: list[str], sources: list[str]) -> int:
-    """Embed and upsert `chunks` (parallel to `sources`) into the collection. Returns count."""
+def upsert_documents(
+    chunks: list[str],
+    sources: list[str],
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> int:
+    """Embed and upsert `chunks` (parallel to `sources`) into the collection. Returns count.
+
+    progress_callback(chunks_done, chunks_total), if given, is called after each batch --
+    embedding a large document can take minutes on CPU, so callers (e.g. the chat UI) can
+    show real progress instead of a plain spinner.
+    """
     if len(chunks) != len(sources):
         raise ValueError("chunks and sources must be the same length")
     if not chunks:
@@ -108,6 +120,8 @@ def upsert_documents(chunks: list[str], sources: list[str]) -> int:
             "  batch %d/%d: embedded + upserted %d chunks in %.2fs",
             batch_num, n_batches, len(points), time.monotonic() - t0,
         )
+        if progress_callback is not None:
+            progress_callback(total, len(chunks))
 
     logger.info("Upsert complete: %d chunks now in collection '%s'", total, collection)
     return total

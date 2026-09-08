@@ -8,6 +8,7 @@ original size) and let the binary go.
 
 import gzip
 import io
+from collections.abc import Callable
 from pathlib import Path
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -19,11 +20,15 @@ from agent.retrieval.qdrant_store import upsert_documents
 # not cutting chunks mid-sentence.
 CHUNK_SIZE = 2000
 CHUNK_OVERLAP = 200
-# Local embeddings have no API quota to protect (that constraint applied only when embeddings
-# went through Gemini). This ceiling now exists purely so an extreme upload can't freeze the
-# UI for minutes without feedback -- 20000 chunks is ~40M characters, comfortably past any
-# normal document.
-MAX_CHUNKS_PER_FILE = 20000
+
+# Local CPU embedding cost is ~linear in total characters processed (measured: ~0.175ms/char
+# on an 8-core/16-thread Ryzen 7 laptop, regardless of how text is chunked -- multiprocessing
+# only bought ~25%, not a multiple of core count). So unlike the old Gemini-quota-based cap,
+# this one exists to keep an *interactive chat upload* from blocking the UI for many minutes.
+# ~500 chunks is roughly a 1-3 minute worst case. For a document you want fully indexed
+# regardless of how long it takes, put it in docs/ and run scripts/ingest_docs.py instead --
+# that path passes max_chunks=None (unlimited) since it's an offline batch job, not a chat wait.
+MAX_CHUNKS_INTERACTIVE = 500
 UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 
 SUPPORTED_EXTENSIONS = ("txt", "md", "pdf", "pptx", "docx")
@@ -94,17 +99,30 @@ def save_compressed_text(filename: str, text: str) -> Path:
     return out_path
 
 
-def ingest_uploaded_file(filename: str, data: bytes) -> dict:
-    """Extract, locally archive (compressed), chunk, and upsert one uploaded file."""
+def ingest_uploaded_file(
+    filename: str,
+    data: bytes,
+    max_chunks: int | None = MAX_CHUNKS_INTERACTIVE,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> dict:
+    """Extract, locally archive (compressed), chunk, and upsert one uploaded file.
+
+    max_chunks=None means no cap (used by the offline batch script); the interactive
+    chat upload path defaults to MAX_CHUNKS_INTERACTIVE so it can't block the UI for
+    many minutes on a huge document. progress_callback(done, total), if given, is
+    called after each embedding batch.
+    """
     text = extract_text(filename, data)
     if not text.strip():
         raise EmptyDocumentError(f"No extractable text found in {filename}")
 
     archive_path = save_compressed_text(filename, text)
     all_chunks = chunk_text(text)
-    truncated = len(all_chunks) > MAX_CHUNKS_PER_FILE
-    chunks = all_chunks[:MAX_CHUNKS_PER_FILE]
-    chunk_count = upsert_documents(chunks, [filename] * len(chunks))
+    truncated = max_chunks is not None and len(all_chunks) > max_chunks
+    chunks = all_chunks[:max_chunks] if max_chunks is not None else all_chunks
+    chunk_count = upsert_documents(
+        chunks, [filename] * len(chunks), progress_callback=progress_callback
+    )
 
     return {
         "filename": filename,
