@@ -10,14 +10,21 @@ import gzip
 import io
 from pathlib import Path
 
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 from agent.retrieval.qdrant_store import upsert_documents
 
-CHUNK_SIZE = 800
-CHUNK_OVERLAP = 100
-MAX_CHUNKS_PER_FILE = 500  # ~400K chars; a free-tier Gemini key can't afford unbounded embed calls
+# ~2000 chars/~500 tokens matches the 2026 chunking-benchmark consensus default; recursive
+# splitting (paragraph -> line -> word -> char fallback) beats naive fixed-size slicing by
+# not cutting chunks mid-sentence.
+CHUNK_SIZE = 2000
+CHUNK_OVERLAP = 200
+MAX_CHUNKS_PER_FILE = 500  # a sane ceiling so one huge upload can't run away unbounded
 UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 
 SUPPORTED_EXTENSIONS = ("txt", "md", "pdf", "pptx", "docx")
+
+_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
 
 
 class UnsupportedFileTypeError(ValueError):
@@ -28,14 +35,8 @@ class EmptyDocumentError(ValueError):
     pass
 
 
-def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + size
-        chunks.append(text[start:end])
-        start = end - overlap
-    return [c.strip() for c in chunks if c.strip()]
+def chunk_text(text: str) -> list[str]:
+    return [c.strip() for c in _splitter.split_text(text) if c.strip()]
 
 
 def extract_text(filename: str, data: bytes) -> str:

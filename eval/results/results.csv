@@ -1,13 +1,13 @@
 id,category,question,passed,confidence,tool_calls,loop_count,detail
-easy-1,easy,What is the monthly price of the Aurora Pro tier?,True,high,none,1,"tool_ok=True (expected=None, got=[]), keyword_ok=True"
-easy-2,easy,What encryption algorithm does Aurora use for data at rest?,True,high,none,1,"tool_ok=True (expected=None, got=[]), keyword_ok=True"
-easy-3,easy,What is the maximum single file size on the Aurora Pro tier?,True,high,none,1,"tool_ok=True (expected=None, got=[]), keyword_ok=True"
-easy-4,easy,Does Aurora support on-premises or air-gapped deployment?,True,high,none,1,"tool_ok=True (expected=None, got=[]), keyword_ok=True"
-easy-5,easy,What compliance certification does Aurora currently hold?,True,high,none,1,"tool_ok=True (expected=None, got=[]), keyword_ok=True"
-hard-1,hard,In what year was the Python programming language first released?,True,high,web_search,2,"tool_ok=True (expected=web_search, got=['web_search']), keyword_ok=True"
-hard-2,hard,Which company originally created the LangChain and LangGraph libraries?,True,low,web_search,2,"tool_ok=True (expected=web_search, got=['web_search']), keyword_ok=True"
-hard-3,hard,What is the boiling point of water in Celsius at sea level?,True,high,"none,web_search",3,"tool_ok=True (expected=web_search, got=['none', 'web_search']), keyword_ok=True"
-hard-4,hard,"If Aurora Pro egress overage is billed at $0.05/GB, how much would 40GB of overage cost?",True,high,calculator,2,"tool_ok=True (expected=calculator, got=['calculator']), keyword_ok=True"
-edge-1,edge,What is Aurora's per-GB pricing for its 'Lunar' data center tier?,True,low,"web_search,web_search",3,"confidence=low (edge cases must be low-confidence, not fabricated)"
-edge-2,edge,What is Aurora Cloud Storage's stock ticker symbol?,True,low,"web_search,web_search",3,"confidence=low (edge cases must be low-confidence, not fabricated)"
-edge-3,edge,Explain the meaning of life in the context of Aurora's SLA.,True,low,"none,none",3,"confidence=low (edge cases must be low-confidence, not fabricated)"
+easy-1,easy,What is the monthly price of the Aurora Pro tier?,True,high,none,1,"tool_ok=True (want=None, got=[]), kw_ok=True"
+easy-2,easy,What encryption algorithm does Aurora use for data at rest?,True,high,none,1,"tool_ok=True (want=None, got=[]), kw_ok=True"
+easy-3,easy,What is the maximum single file size on the Aurora Pro tier?,True,high,none,1,"tool_ok=True (want=None, got=[]), kw_ok=True"
+easy-4,easy,Does Aurora support on-premises or air-gapped deployment?,True,high,none,1,"tool_ok=True (want=None, got=[]), kw_ok=True"
+easy-5,easy,What compliance certification does Aurora currently hold?,True,high,none,1,"tool_ok=True (want=None, got=[]), kw_ok=True"
+hard-1,hard,In what year was the Python programming language first released?,True,low,web_search,2,"tool_ok=True (want=web_search, got=['web_search']), kw_ok=True"
+hard-2,hard,Which company originally created the LangChain and LangGraph libraries?,True,high,web_search,2,"tool_ok=True (want=web_search, got=['web_search']), kw_ok=True"
+hard-3,hard,What is the boiling point of water in Celsius at sea level?,True,high,web_search,2,"tool_ok=True (want=web_search, got=['web_search']), kw_ok=True"
+hard-4,hard,"If Aurora Pro egress overage is billed at $0.05/GB, how much would 40GB of overage cost?",False,high,none,1,"tool_ok=False (want=calculator, got=[]), kw_ok=True"
+edge-1,edge,What is Aurora's per-GB pricing for its 'Lunar' data center tier?,True,low,"web_search,web_search",3,confidence=low (edge cases must be low-confidence)
+edge-2,edge,What is Aurora Cloud Storage's stock ticker symbol?,True,low,"web_search,web_search",3,confidence=low (edge cases must be low-confidence)
+edge-3,edge,Explain the meaning of life in the context of Aurora's SLA.,True,low,"web_search,web_search",3,confidence=low (edge cases must be low-confidence)

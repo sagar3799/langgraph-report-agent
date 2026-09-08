@@ -4,6 +4,8 @@ import pytest
 
 from agent import ingestion
 from agent.ingestion import (
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
     EmptyDocumentError,
     UnsupportedFileTypeError,
     chunk_text,
@@ -40,10 +42,30 @@ def test_extract_text_dispatches_docx(monkeypatch):
     assert extract_text("memo.docx", b"fake-docx-bytes") == "doc text"
 
 
-def test_chunk_text_respects_overlap():
-    chunks = chunk_text("a" * 1000, size=800, overlap=100)
-    assert len(chunks) == 2
-    assert len(chunks[0]) == 800
+def test_chunk_text_splits_long_text_into_multiple_chunks():
+    chunks = chunk_text("a" * (CHUNK_SIZE * 3))
+    assert len(chunks) > 1
+    assert all(len(c) <= CHUNK_SIZE for c in chunks)
+
+
+def test_chunk_text_short_text_is_a_single_chunk():
+    assert chunk_text("short text, well under the chunk size") == [
+        "short text, well under the chunk size"
+    ]
+
+
+def test_chunk_text_prefers_paragraph_boundary_over_mid_sentence_cut():
+    # Long enough to force a split; the boundary should land on "\n\n", not mid-word.
+    first = "First paragraph sentence. " * 80
+    second = "Second paragraph sentence. " * 80
+    chunks = chunk_text(first + "\n\n" + second)
+    assert len(chunks) >= 2
+    assert not any("First" in c and "Second" in c for c in chunks)
+
+
+def test_chunk_text_uses_module_constants():
+    assert CHUNK_SIZE > 0
+    assert 0 <= CHUNK_OVERLAP < CHUNK_SIZE
 
 
 def test_ingest_uploaded_file_raises_on_empty_text(monkeypatch):

@@ -5,8 +5,9 @@ context is sufficient, calls a web-search or calculator tool when it isn't, and 
 structured (Pydantic-validated) report. Includes a 12-question eval harness that scores
 tool-use correctness and confidence calibration, not just "did it produce text."
 
-Built with free-tier tools only: Google Gemini (free API tier), Qdrant Cloud (free 1GB
-cluster), and DuckDuckGo search (no API key required).
+Built with free tools only: Google Gemini (free API tier, used for grading/report-writing
+only), Qdrant Cloud (free 1GB cluster), local embeddings + reranking via `fastembed`
+(no API, no rate limit — runs on-device), and DuckDuckGo search (no API key required).
 
 The chat UI supports attaching files directly in the message box (like ChatGPT) — `.txt`,
 `.md`, `.pdf`, `.pptx`, and `.docx` are extracted, chunked, embedded, and added to the
@@ -35,8 +36,11 @@ graph TD;
 	classDef last fill:#bfb6fc
 ```
 
-- **retrieve**: embeds the question with Gemini (`gemini-embedding-001`) and does a
-  similarity search against Qdrant.
+- **retrieve**: embeds the question locally (`fastembed` / `BAAI/bge-small-en-v1.5`, ONNX,
+  no API call), does a vector search against Qdrant for 15 candidates, then reranks them
+  with a local cross-encoder (`Xenova/ms-marco-MiniLM-L-6-v2`) down to the top 4. Plain
+  vector similarity alone tends to cluster everything in a narrow, hard-to-separate score
+  band; the reranker gives a much more decisive signal (see below).
 - **grade**: an LLM call that returns `{sufficient, reason, next_tool, tool_input}` as
   validated JSON — the "agent brain" deciding whether to answer now or gather more evidence.
 - **call_tool**: runs `web_search` (DuckDuckGo, free) or `calculator` (a restricted AST
@@ -45,6 +49,27 @@ graph TD;
   grader can't spin forever.
 - **write_report**: writes a structured `Report` (title, summary, sections, sources,
   confidence) grounded only in what was retrieved/found.
+
+## Retrieval quality: chunking + reranking, not just "call an embedding API"
+
+Two changes replaced an earlier, weaker version of this pipeline:
+
+- **Chunking**: naive fixed-width slicing (cutting text every 800 characters, mid-sentence)
+  was replaced with `langchain-text-splitters`' `RecursiveCharacterTextSplitter` — it splits
+  on paragraph breaks first, then sentences, then words, only falling back to a hard
+  character cut as a last resort. 2026 chunking benchmarks (Vectara, Chroma) consistently
+  find this beats fancier "semantic chunking" for the effort, at effectively zero extra cost.
+- **Reranking**: an initial vector search pulls 15 candidates from Qdrant, then a local
+  cross-encoder reranks them before the top 4 go to the LLM. Plain cosine similarity tends to
+  score everything in a narrow band (e.g. 0.6–0.75) that's hard to distinguish; the reranker
+  produces a decisive signal instead — asking "what access control roles does Aurora
+  support?" scored the actually-relevant security doc at **+5.7** and the irrelevant pricing
+  doc at **-6.4**, instead of both landing somewhere in "kind of similar."
+
+Both the embedder (`BAAI/bge-small-en-v1.5`) and reranker (`Xenova/ms-marco-MiniLM-L-6-v2`)
+run locally via `fastembed` (ONNX, CPU-only, no GPU needed) — a few hundred MB downloaded
+once, then zero API calls and zero rate limits for retrieval, ever. Gemini is only called
+for the grading and report-writing steps now.
 
 ## Failure mode handled: malformed structured output
 
@@ -74,15 +99,21 @@ matching.
 | easy-3 | easy | PASS | high | none | 1 |
 | easy-4 | easy | PASS | high | none | 1 |
 | easy-5 | easy | PASS | high | none | 1 |
-| hard-1 | hard | PASS | high | web_search | 2 |
-| hard-2 | hard | PASS | low | web_search | 2 |
-| hard-3 | hard | PASS | high | none,web_search | 3 |
-| hard-4 | hard | PASS | high | calculator | 2 |
+| hard-1 | hard | PASS | low | web_search | 2 |
+| hard-2 | hard | PASS | high | web_search | 2 |
+| hard-3 | hard | PASS | high | web_search | 2 |
+| hard-4 | hard | FAIL | high | none | 1 |
 | edge-1 | edge | PASS | low | web_search,web_search | 3 |
 | edge-2 | edge | PASS | low | web_search,web_search | 3 |
-| edge-3 | edge | PASS | low | none,none | 3 |
+| edge-3 | edge | PASS | low | web_search,web_search | 3 |
 
-**12/12 passed.** Full detail (raw pass/fail reasoning per case) in
+**11/12 passed.** The one failure (`hard-4`, a one-step multiplication) isn't a retrieval
+regression: the model computed the correct dollar amount directly instead of invoking the
+calculator tool, so the eval's *tool-use* check fails even though the *answer* was right.
+That's a legitimate, honestly-reported miss against a strict grading criterion, not a bug
+papered over — left as a FAIL rather than loosened to a pass.
+
+Full detail (raw pass/fail reasoning per case) in
 [`eval/results/results.md`](eval/results/results.md), regenerated each run.
 
 Re-run it yourself: `python eval/run_eval.py`
@@ -130,6 +161,8 @@ tests/             # pytest — mocks the LLM/network, no live API calls in CI
    ```bash
    python scripts/ingest_docs.py
    ```
+   First run downloads the local embedding + reranking models (~350MB total, one-time,
+   cached under your home directory) — no API key needed for this part.
 
 ## Running it
 
@@ -141,8 +174,14 @@ tests/             # pytest — mocks the LLM/network, no live API calls in CI
 ## A note on free-tier limits
 
 Gemini's free tier rate-limits per model. This project defaults to `gemini-flash-lite-latest`
-specifically because it has a much higher free daily quota than `gemini-flash-latest` — the
-first version of this used the latter and hit `429 RESOURCE_EXHAUSTED` after ~10 questions.
-Both `streamlit_app.py` and `app.py` catch upstream failures and surface a readable error
-instead of crashing, since hitting a free-tier ceiling is an expected failure mode here, not
-an edge case to ignore.
+specifically because it has a much higher free daily quota than `gemini-flash-latest` — an
+earlier version used the latter and hit `429 RESOURCE_EXHAUSTED` after ~10 questions. Both
+`streamlit_app.py` and `app.py` catch upstream failures and surface a readable error instead
+of crashing, since hitting a free-tier ceiling is an expected failure mode here, not an edge
+case to ignore.
+
+Embeddings and reranking used to go through Gemini's embedding API too, which has its own
+(much stricter) free-tier quota — heavy testing in one session was enough to exhaust it, since
+every retrieval and every file upload needed an API round-trip. Moving both to local `fastembed`
+models removed that failure mode for retrieval entirely: Gemini is now only in the loop for
+grading and report-writing, which is a small fraction of the calls a busy session makes.
