@@ -23,3 +23,4 @@ class AgentState(TypedDict, total=False):
     tool_results: Annotated[list[str], operator.add]
     loop_count: int
     report: Report
+    trace: Annotated[list[str], operator.add]

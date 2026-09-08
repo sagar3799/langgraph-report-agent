@@ -34,9 +34,19 @@ def build_graph():
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+
+    from agent.logging_config import configure_logging
+
+    load_dotenv()
+    configure_logging()
+
     app = build_graph()
     result = app.invoke({"question": "What is LangGraph?"})
     print("sufficient:", result["sufficient"])
     print("loop_count:", result["loop_count"])
     print("tool_calls_made:", result["tool_calls_made"])
+    print("trace:")
+    for line in result.get("trace", []):
+        print(" ", line)
     print("report:", result["report"].model_dump_json(indent=2))

@@ -1,4 +1,9 @@
-"""Real node implementations: Qdrant retrieval, Gemini grading/report-writing, tool calls."""
+"""Real node implementations: Qdrant retrieval, Gemini grading/report-writing, tool calls.
+
+Each node logs what it did (visible in the terminal running streamlit/uvicorn) and appends
+a short human-readable line to state["trace"], which the UI renders as a step-by-step view
+of what the agent actually did — retrieval isn't a black box.
+"""
 
 import logging
 
@@ -16,8 +21,17 @@ TOP_K = 4
 
 
 def retrieve_node(state: AgentState) -> dict:
+    logger.info("[retrieve] searching knowledge base for: %r", state["question"])
     docs = search(state["question"], top_k=TOP_K)
-    return {"retrieved_docs": docs}
+    logger.info("[retrieve] got %d chunk(s): %s", len(docs), [d["source"] for d in docs])
+
+    if docs:
+        sources = ", ".join(f"{d['source']} ({d['score']:.2f})" for d in docs)
+        trace_line = f"🔎 Retrieved {len(docs)} chunk(s): {sources}"
+    else:
+        trace_line = "🔎 Retrieved 0 chunks (knowledge base empty or nothing matched)"
+
+    return {"retrieved_docs": docs, "trace": [trace_line]}
 
 
 def _format_context(state: AgentState) -> str:
@@ -33,6 +47,7 @@ def _format_context(state: AgentState) -> str:
 
 def grade_node(state: AgentState) -> dict:
     loop_count = state.get("loop_count", 0)
+    logger.info("[grade] loop %d: asking Gemini whether context is sufficient...", loop_count + 1)
     llm = get_chat_model()
 
     try:
@@ -49,13 +64,14 @@ def grade_node(state: AgentState) -> dict:
             schema=GradeResult,
         )
     except StructuredOutputError as exc:
-        logger.warning("Grading failed, defaulting to insufficient: %s", exc)
+        logger.warning("[grade] grading call failed, defaulting to insufficient: %s", exc)
         return {
             "sufficient": False,
             "grade_reason": "grading call failed; defaulting to insufficient",
             "next_tool": "none",
             "tool_input": "",
             "loop_count": loop_count + 1,
+            "trace": ["🧠 Grading failed (API error) — defaulting to insufficient"],
         }
 
     next_tool = grade.next_tool
@@ -65,36 +81,53 @@ def grade_node(state: AgentState) -> dict:
         next_tool = "web_search"
         tool_input = state["question"]
 
+    logger.info(
+        "[grade] sufficient=%s reason=%r next_tool=%s", grade.sufficient, grade.reason, next_tool
+    )
+    verdict = "sufficient" if grade.sufficient else f"insufficient -> will call {next_tool}"
+    trace_line = f"🧠 Graded as {verdict} ({grade.reason})"
+
     return {
         "sufficient": grade.sufficient,
         "grade_reason": grade.reason,
         "next_tool": next_tool,
         "tool_input": tool_input,
         "loop_count": loop_count + 1,
+        "trace": [trace_line],
     }
 
 
 def call_tool_node(state: AgentState) -> dict:
     tool_name = state.get("next_tool", "none")
     tool_input = state.get("tool_input", "")
+    logger.info("[call_tool] invoking %s(%r)", tool_name, tool_input)
 
     if tool_name == "web_search":
         try:
             results = web_search(tool_input)
             result_text = "\n".join(f"{r['title']}: {r['snippet']} ({r['url']})" for r in results)
+            trace_line = f"🌐 web_search({tool_input!r}) -> {len(results)} result(s)"
         except WebSearchError as exc:
             result_text = f"web_search error: {exc}"
+            trace_line = f"🌐 web_search({tool_input!r}) failed: {exc}"
     elif tool_name == "calculator":
         try:
-            result_text = f"{tool_input} = {calculate(tool_input)}"
+            value = calculate(tool_input)
+            result_text = f"{tool_input} = {value}"
+            trace_line = f"🧮 calculator({tool_input!r}) = {value}"
         except CalculatorError as exc:
             result_text = f"calculator error: {exc}"
+            trace_line = f"🧮 calculator({tool_input!r}) failed: {exc}"
     else:
         result_text = "no tool call was made"
+        trace_line = "⚠️ call_tool reached with no tool selected (should not normally happen)"
+
+    logger.info("[call_tool] result: %s", result_text[:200])
 
     return {
         "tool_calls_made": [tool_name],
         "tool_results": [result_text],
+        "trace": [trace_line],
     }
 
 
@@ -107,6 +140,7 @@ def route_after_grade(state: AgentState) -> str:
 
 
 def write_report_node(state: AgentState) -> dict:
+    logger.info("[write_report] asking Gemini to write the final structured report...")
     llm = get_chat_model()
     sources = sorted({d["source"] for d in state.get("retrieved_docs", [])})
 
@@ -121,9 +155,10 @@ def write_report_node(state: AgentState) -> dict:
             user_prompt=f"Question: {state['question']}\n\nContext:\n{_format_context(state)}",
             schema=Report,
         )
-        return {"report": report}
+        logger.info("[write_report] done, confidence=%s", report.confidence)
+        return {"report": report, "trace": [f"✅ Report written (confidence: {report.confidence})"]}
     except StructuredOutputError as exc:
-        logger.warning("Report generation failed after retry, returning degraded report: %s", exc)
+        logger.warning("[write_report] failed after retry, returning degraded report: %s", exc)
         fallback = Report(
             title="Report generation failed",
             summary=(
@@ -134,4 +169,7 @@ def write_report_node(state: AgentState) -> dict:
             sources=sources,
             confidence="low",
         )
-        return {"report": fallback}
+        return {
+            "report": fallback,
+            "trace": [f"❌ Report generation failed after retry: {exc}"],
+        }

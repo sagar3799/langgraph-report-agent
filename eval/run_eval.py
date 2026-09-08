@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from agent.graph import build_graph  # noqa: E402
+from agent.logging_config import configure_logging  # noqa: E402
 
 QUESTIONS_PATH = Path(__file__).resolve().parent / "questions.json"
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -54,6 +55,7 @@ def score_case(case: dict, result: dict) -> dict:
 
 def main() -> None:
     load_dotenv()
+    configure_logging()
     RESULTS_DIR.mkdir(exist_ok=True)
 
     cases = json.loads(QUESTIONS_PATH.read_text(encoding="utf-8"))

@@ -6,7 +6,9 @@ Qdrant itself) instead of a rate-limited API. This also lets retrieval widen its
 the standard fix for "vector search alone isn't precise enough."
 """
 
+import logging
 import os
+import time
 import uuid
 
 from fastembed import TextEmbedding
@@ -14,10 +16,12 @@ from fastembed.rerank.cross_encoder import TextCrossEncoder
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
+logger = logging.getLogger(__name__)
+
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIM = 384
 RERANKER_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2"
-EMBED_BATCH_SIZE = 32
+EMBED_BATCH_SIZE = 128  # local processing, not a rate-limited API call -- larger batches are fine
 RETRIEVE_CANDIDATES = 15  # widen the net before reranking down to top_k
 
 _embedder: TextEmbedding | None = None
@@ -39,7 +43,10 @@ def get_embedder() -> TextEmbedding:
     """Lazily load and cache the local embedding model (loaded once per process)."""
     global _embedder
     if _embedder is None:
+        logger.info("Loading embedding model %s (first call downloads it)...", EMBEDDING_MODEL)
+        t0 = time.monotonic()
         _embedder = TextEmbedding(model_name=EMBEDDING_MODEL)
+        logger.info("Embedding model ready in %.1fs", time.monotonic() - t0)
     return _embedder
 
 
@@ -47,7 +54,10 @@ def get_reranker() -> TextCrossEncoder:
     """Lazily load and cache the local cross-encoder reranker."""
     global _reranker
     if _reranker is None:
+        logger.info("Loading local reranker model %s (first call downloads it)...", RERANKER_MODEL)
+        t0 = time.monotonic()
         _reranker = TextCrossEncoder(model_name=RERANKER_MODEL)
+        logger.info("Reranker model ready in %.1fs", time.monotonic() - t0)
     return _reranker
 
 
@@ -71,12 +81,19 @@ def upsert_documents(chunks: list[str], sources: list[str]) -> int:
     ensure_collection(client, collection)
     embedder = get_embedder()
 
+    n_batches = (len(chunks) + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE
+    logger.info(
+        "Embedding %d chunks in %d batch(es) of up to %d...",
+        len(chunks), n_batches, EMBED_BATCH_SIZE,
+    )
+
     total = 0
-    for start in range(0, len(chunks), EMBED_BATCH_SIZE):
+    for batch_num, start in enumerate(range(0, len(chunks), EMBED_BATCH_SIZE), start=1):
         batch_chunks = chunks[start : start + EMBED_BATCH_SIZE]
         batch_sources = sources[start : start + EMBED_BATCH_SIZE]
-        vectors = embedder.embed(batch_chunks)
 
+        t0 = time.monotonic()
+        vectors = embedder.embed(batch_chunks)
         points = [
             PointStruct(
                 id=str(uuid.uuid4()),
@@ -87,7 +104,12 @@ def upsert_documents(chunks: list[str], sources: list[str]) -> int:
         ]
         client.upsert(collection_name=collection, points=points)
         total += len(points)
+        logger.info(
+            "  batch %d/%d: embedded + upserted %d chunks in %.2fs",
+            batch_num, n_batches, len(points), time.monotonic() - t0,
+        )
 
+    logger.info("Upsert complete: %d chunks now in collection '%s'", total, collection)
     return total
 
 
@@ -119,22 +141,37 @@ def search(query: str, top_k: int = 4) -> list[dict]:
     client = get_qdrant_client()
     collection = get_collection_name()
     if not client.collection_exists(collection):
+        logger.warning("Collection '%s' doesn't exist yet — returning no results", collection)
         return []
 
+    logger.info("Embedding query locally: %r", query)
     embedder = get_embedder()
+    t0 = time.monotonic()
     query_vector = next(iter(embedder.query_embed(query))).tolist()
+    logger.info("  query embedded in %.2fs", time.monotonic() - t0)
 
+    t0 = time.monotonic()
     hits = client.query_points(
         collection_name=collection, query=query_vector, limit=RETRIEVE_CANDIDATES
     ).points
+    logger.info(
+        "Qdrant vector search: %d candidate(s) from '%s' in %.2fs",
+        len(hits), collection, time.monotonic() - t0,
+    )
     if not hits:
         return []
 
+    t0 = time.monotonic()
     reranker = get_reranker()
     texts = [hit.payload["text"] for hit in hits]
     scores = reranker.rerank(query, texts)
 
     reranked = sorted(zip(hits, scores, strict=True), key=lambda pair: pair[1], reverse=True)
+    logger.info(
+        "Reranked %d candidates in %.2fs, keeping top %d (scores: %s)",
+        len(hits), time.monotonic() - t0, top_k,
+        [round(float(s), 2) for _, s in reranked[:top_k]],
+    )
 
     return [
         {"text": hit.payload["text"], "source": hit.payload["source"], "score": float(score)}

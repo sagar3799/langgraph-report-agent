@@ -19,7 +19,11 @@ from agent.retrieval.qdrant_store import upsert_documents
 # not cutting chunks mid-sentence.
 CHUNK_SIZE = 2000
 CHUNK_OVERLAP = 200
-MAX_CHUNKS_PER_FILE = 500  # a sane ceiling so one huge upload can't run away unbounded
+# Local embeddings have no API quota to protect (that constraint applied only when embeddings
+# went through Gemini). This ceiling now exists purely so an extreme upload can't freeze the
+# UI for minutes without feedback -- 20000 chunks is ~40M characters, comfortably past any
+# normal document.
+MAX_CHUNKS_PER_FILE = 20000
 UPLOADS_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 
 SUPPORTED_EXTENSIONS = ("txt", "md", "pdf", "pptx", "docx")

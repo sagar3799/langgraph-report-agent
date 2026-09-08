@@ -7,7 +7,10 @@ from pydantic import BaseModel
 load_dotenv()
 
 from agent.graph import build_graph  # noqa: E402
+from agent.logging_config import configure_logging  # noqa: E402
 from agent.schemas import Report  # noqa: E402
+
+configure_logging()
 
 app = FastAPI(title="LangGraph Report Agent")
 _graph = build_graph()
@@ -21,6 +24,7 @@ class AskResponse(BaseModel):
     report: Report
     tool_calls_made: list[str]
     loop_count: int
+    trace: list[str]
 
 
 @app.get("/health")
@@ -41,4 +45,5 @@ def ask(request: AskRequest) -> AskResponse:
         report=result["report"],
         tool_calls_made=result.get("tool_calls_made", []),
         loop_count=result.get("loop_count", 0),
+        trace=result.get("trace", []),
     )

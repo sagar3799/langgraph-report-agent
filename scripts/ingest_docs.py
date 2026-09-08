@@ -12,12 +12,14 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from agent.ingestion import SUPPORTED_EXTENSIONS, ingest_uploaded_file  # noqa: E402
+from agent.logging_config import configure_logging  # noqa: E402
 
 DOCS_DIR = Path(__file__).resolve().parent.parent / "docs"
 
 
 def main() -> None:
     load_dotenv()
+    configure_logging()
 
     doc_paths = sorted(
         p for ext in SUPPORTED_EXTENSIONS for p in DOCS_DIR.glob(f"*.{ext}")

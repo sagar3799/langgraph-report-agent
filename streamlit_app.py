@@ -21,8 +21,11 @@ from agent.ingestion import (  # noqa: E402
     UnsupportedFileTypeError,
     ingest_uploaded_file,
 )
+from agent.logging_config import configure_logging  # noqa: E402
 from agent.retrieval.qdrant_store import list_sources  # noqa: E402
 from agent.schemas import Report  # noqa: E402
+
+configure_logging()
 
 st.set_page_config(page_title="Report Agent", page_icon="🧭", layout="centered")
 
@@ -68,7 +71,7 @@ def confidence_badge_html(confidence: str) -> str:
     return f'<span class="confidence-badge" style="{style}">{label} confidence</span>'
 
 
-def render_report(report: Report, tool_calls: list[str], loop_count: int) -> None:
+def render_report(report: Report, tool_calls: list[str], loop_count: int, trace: list[str]) -> None:
     st.markdown(f"#### {report.title}")
     st.markdown(confidence_badge_html(report.confidence), unsafe_allow_html=True)
     st.write("")
@@ -86,6 +89,11 @@ def render_report(report: Report, tool_calls: list[str], loop_count: int) -> Non
         tools_used = [t for t in tool_calls if t != "none"]
         label = ", ".join(tools_used) if tools_used else "none"
         st.caption(f"**Tools called:** {label} · **loops:** {loop_count}")
+
+    if trace:
+        with st.expander("🔍 Agent steps (retrieval, grading, tool calls)"):
+            for line in trace:
+                st.markdown(f"- {line}")
 
 
 def _format_bytes(n: int) -> str:
@@ -166,7 +174,9 @@ for turn in st.session_state.history:
                 if turn.get("report"):
                     st.write("")
             if turn.get("report"):
-                render_report(turn["report"], turn["tool_calls"], turn["loop_count"])
+                render_report(
+                    turn["report"], turn["tool_calls"], turn["loop_count"], turn.get("trace", [])
+                )
 
 submission = st.chat_input(
     "Ask a question, or attach files to add to the knowledge base...",
@@ -198,7 +208,7 @@ if submission:
             if question:
                 st.write("")
 
-        report = tool_calls = loop_count = None
+        report = tool_calls = loop_count = trace = None
         if question:
             try:
                 with st.spinner("Retrieving, grading, and writing report..."):
@@ -207,7 +217,8 @@ if submission:
                 report = result["report"]
                 tool_calls = result.get("tool_calls_made", [])
                 loop_count = result.get("loop_count", 0)
-                render_report(report, tool_calls, loop_count)
+                trace = result.get("trace", [])
+                render_report(report, tool_calls, loop_count, trace)
             except Exception as exc:
                 st.error(
                     "The agent hit an error calling Gemini or Qdrant "
@@ -221,5 +232,6 @@ if submission:
             "report": report,
             "tool_calls": tool_calls,
             "loop_count": loop_count,
+            "trace": trace,
         }
     )
