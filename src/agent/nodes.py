@@ -42,6 +42,11 @@ def _format_context(state: AgentState) -> str:
         parts.append("Retrieved documents:\n" + "\n\n".join(doc_lines))
     if tool_lines:
         parts.append("Prior tool results:\n" + "\n\n".join(tool_lines))
+    # The grader sometimes works out the actual answer in its own reasoning (e.g. applying a
+    # known formula) while judging sufficiency. Without this, write_report only sees the raw
+    # docs/tool output and can end up contradicting a grade that already solved it.
+    if state.get("sufficient") and state.get("grade_reason"):
+        parts.append(f"Grading assessment (already judged sufficient): {state['grade_reason']}")
     return "\n\n".join(parts) if parts else "(no context retrieved yet)"
 
 
@@ -55,10 +60,22 @@ def grade_node(state: AgentState) -> dict:
             llm,
             system_prompt=(
                 "You grade whether the given context is sufficient to write a confident, accurate "
-                "answer to the user's question. Be strict: if the context doesn't directly address "
-                "the question, mark it insufficient. Prefer 'web_search' for missing facts/current "
-                "info, 'calculator' only when the question needs arithmetic on numbers already "
-                "present in the context."
+                "answer to the user's question. Be strict about missing FACTS: if the question "
+                "needs a specific real-world fact, name, date, or figure that the context doesn't "
+                "contain, mark it insufficient and use 'web_search'. But if the question is a "
+                "reasoning or math problem that only needs applying a well-known formula or "
+                "principle to numbers already given in the question or context (e.g. geometry, "
+                "percentages, ratios) — mark it sufficient; the model can apply the formula itself "
+                "in the report, and web search for a generic formula rarely returns a directly "
+                "quotable answer anyway. Use 'calculator' only for arithmetic on numbers already "
+                "present in the context.\n\n"
+                "Watch for a specific trap: a web search can surface a real page about a "
+                "different, unrelated thing that merely shares a name or keyword with what the "
+                "question is actually about (e.g. a search for 'Aurora's SLA' can return real "
+                "docs about the unrelated Apache Aurora software project, which happens to use "
+                "the word 'meaning' as jargon). A keyword match is NOT sufficiency — if the "
+                "retrieved content isn't actually about the specific subject the question means, "
+                "mark it insufficient rather than treating the coincidence as an answer."
             ),
             user_prompt=f"Question: {state['question']}\n\nContext:\n{_format_context(state)}",
             schema=GradeResult,
@@ -105,8 +122,14 @@ def call_tool_node(state: AgentState) -> dict:
     if tool_name == "web_search":
         try:
             results = web_search(tool_input)
-            result_text = "\n".join(f"{r['title']}: {r['snippet']} ({r['url']})" for r in results)
-            trace_line = f"🌐 web_search({tool_input!r}) -> {len(results)} result(s)"
+            fetched = sum(1 for r in results if r.get("content"))
+            result_text = "\n\n".join(
+                f"{r['title']} ({r['url']}):\n{r['content'] or r['snippet']}" for r in results
+            )
+            trace_line = (
+                f"🌐 web_search({tool_input!r}) -> {len(results)} result(s), "
+                f"{fetched} full page(s) fetched"
+            )
         except WebSearchError as exc:
             result_text = f"web_search error: {exc}"
             trace_line = f"🌐 web_search({tool_input!r}) failed: {exc}"
@@ -149,8 +172,16 @@ def write_report_node(state: AgentState) -> dict:
             llm,
             system_prompt=(
                 "You write a structured report answering the user's question using only the given "
-                "context. If the context doesn't fully answer it, say so explicitly in the summary "
-                "and set confidence to 'low'. Never invent facts not present in the context."
+                "context. If the context doesn't fully answer it — including when a search found "
+                "nothing relevant, or only found a similarly-named entity that isn't confirmed to "
+                "be the one asked about — say so explicitly in the summary and set confidence to "
+                "'low'. Never invent facts, or a relationship between two entities (e.g. never "
+                "call one company the 'parent' of another), not present in the context.\n\n"
+                "The ONE exception: if the context includes a 'Grading assessment' line that "
+                "applies a well-known MATHEMATICAL OR LOGICAL formula to numbers already given in "
+                "the question, that is a certain derivation, not a guess — present it directly "
+                "and set confidence to 'high' rather than hedging just because it wasn't copied "
+                "from a document."
             ),
             user_prompt=f"Question: {state['question']}\n\nContext:\n{_format_context(state)}",
             schema=Report,

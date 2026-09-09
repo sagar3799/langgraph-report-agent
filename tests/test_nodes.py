@@ -32,3 +32,32 @@ def test_grade_node_respects_explicit_tool_choice(monkeypatch):
 
     assert result["next_tool"] == "calculator"
     assert result["tool_input"] == "2+2"
+
+
+def test_call_tool_node_prefers_fetched_content_over_snippet(monkeypatch):
+    monkeypatch.setattr(
+        nodes,
+        "web_search",
+        lambda query: [
+            {
+                "title": "Full page",
+                "url": "https://a.com",
+                "snippet": "thin snippet",
+                "content": "rich full page text",
+            },
+            {
+                "title": "No fetch",
+                "url": "https://b.com",
+                "snippet": "only a snippet here",
+                "content": None,
+            },
+        ],
+    )
+
+    result = nodes.call_tool_node({"next_tool": "web_search", "tool_input": "some query"})
+
+    result_text = result["tool_results"][0]
+    assert "rich full page text" in result_text
+    assert "thin snippet" not in result_text  # content available -> snippet not used
+    assert "only a snippet here" in result_text  # no content -> falls back to snippet
+    assert "1 full page(s) fetched" in result["trace"][0]

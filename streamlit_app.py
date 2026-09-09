@@ -208,7 +208,7 @@ submission = st.chat_input(
     "Ask a question, or attach files to add to the knowledge base...",
     accept_file="multiple",
     file_type=list(SUPPORTED_EXTENSIONS),
-    max_upload_size=200,
+    max_upload_size=20,
 )
 
 if submission:
