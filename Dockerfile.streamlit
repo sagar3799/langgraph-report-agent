@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY pyproject.toml .
+COPY src/ src/
+RUN pip install --no-cache-dir .
+
+COPY scripts/prefetch_models.py scripts/prefetch_models.py
+
+# Bakes the ~350MB embedding+reranker models into the image at build time, not on first
+# request -- removes the download penalty from cold start (model load itself still takes a
+# few seconds; see README for the precise cold-start story).
+RUN python scripts/prefetch_models.py
+
+COPY streamlit_app.py .
+
+ENV PORT=8080
+EXPOSE 8080
+CMD streamlit run streamlit_app.py --server.port $PORT --server.address 0.0.0.0

@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: report-agent-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile.api
+    plan: free
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_HOST
+        sync: false
+
+  - type: web
+    name: report-agent-ui
+    runtime: docker
+    dockerfilePath: ./Dockerfile.streamlit
+    plan: free
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_HOST
+        sync: false

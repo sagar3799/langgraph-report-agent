@@ -7,6 +7,7 @@ dependencies = [
     "langgraph>=0.2.0",
     "langchain-core>=0.3.0",
     "langchain-google-genai>=2.0.0",
+    "google-api-core>=2.0.0",  # llm.py imports GoogleAPIError directly, not just via langchain
     "langchain-text-splitters>=0.3.0",
     "qdrant-client>=1.11.0",
     "fastembed>=0.4.0",
@@ -21,6 +22,7 @@ dependencies = [
     "pypdf>=5.0.0",
     "python-pptx>=1.0.0",
     "python-docx>=1.1.0",
+    "langfuse>=2.0.0",
 ]
 
 [project.optional-dependencies]

@@ -8,6 +8,7 @@ load_dotenv()
 
 from agent.graph import build_graph  # noqa: E402
 from agent.logging_config import configure_logging  # noqa: E402
+from agent.observability import get_invoke_config  # noqa: E402
 from agent.schemas import Report  # noqa: E402
 
 configure_logging()
@@ -35,7 +36,9 @@ def health() -> dict:
 @app.post("/ask", response_model=AskResponse)
 def ask(request: AskRequest) -> AskResponse:
     try:
-        result = _graph.invoke({"question": request.question})
+        result = _graph.invoke(
+            {"question": request.question}, config=get_invoke_config(source="api")
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=503,
