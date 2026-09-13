@@ -172,7 +172,8 @@ uploads/           # gzip-compressed extracted text from chat uploads (gitignore
 eval/
   questions.json   # 12 test questions (easy/hard/edge)
   run_eval.py      # scores tool-use + confidence, writes results.csv/.md
-tests/             # pytest — mocks the LLM/network, no live API calls in CI
+tests/             # pytest — mocks the LLM/network, no live API calls needed
+.github/workflows/ci.yml  # runs ruff + pytest on every push/PR
 ```
 
 ## Setup
@@ -213,17 +214,30 @@ and the API can be demoed alone (`curl`/Postman) without spinning up the whole c
 Both are plain Docker containers (`Dockerfile.api`, `Dockerfile.streamlit`), provisioned
 together from [`render.yaml`](render.yaml) as a Render Blueprint.
 
-**Why Render**: free tier genuinely requires no credit card (unlike GCP Cloud Run, Fly.io, or
-Railway, all of which gate free usage behind a card on file) — verified 2026-09-13. 750 free
-instance-hours/month, 15-minute spin-down when idle, real Docker support rather than a
-stripped-down runtime.
+**Why Render**: free tier requires no credit card, unlike GCP Cloud Run, Fly.io, or Railway,
+all of which gate free usage behind a card on file — this account was never asked for one
+(2026-09-13). Worth being precise about that claim: Render's own support forum documents cases
+where its anti-fraud system card-gates specific accounts even on the free plan, so "no card"
+isn't a guarantee for every account, just what actually happened here. 750 free instance-hours/
+month, 15-minute spin-down when idle, real Docker support rather than a stripped-down runtime.
 
 **Why the models are baked into the image at build time**
 (`scripts/prefetch_models.py`, run during `docker build`): without this, the first request
 after every cold start would pay a ~350MB download on top of loading the models into memory.
-Baking them in at build time removes the *download* penalty; loading ~350MB of ONNX models
-into memory on a fresh cold start still takes a few seconds — that part doesn't go away, and
-it's worth being precise about which cost was actually eliminated.
+Baking them in at build time removes the *download* penalty; loading the models into memory on
+a fresh start still has a real cost — measured, not guessed, on a local Docker container (build
+already baked in, `docker run` to first successful request):
+
+- Container boot to `/health` responding: **2.2s**
+- Embedding + reranker model load into memory (already on disk, no download): **~0.4s** total
+  (0.2s each) — this is the specific cost pre-baking couldn't eliminate
+- First real `/ask` request end-to-end, simple question: **4.9s** (includes the model load above,
+  plus a genuine Qdrant round-trip and two Gemini API calls — normal pipeline latency, not
+  cold-start-specific)
+
+These are local-container numbers, not a production Render measurement — actual Render cold
+start will differ by whatever its own container-boot and network-path overhead adds on top.
+Worth re-measuring once actually deployed there rather than assuming the local number transfers.
 
 **Secrets**: never in the image or the repo. `render.yaml` declares each secret with
 `sync: false`, which tells Render to prompt for the actual value in its dashboard instead of
