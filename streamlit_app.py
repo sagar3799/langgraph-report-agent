@@ -23,6 +23,7 @@ from agent.ingestion import (  # noqa: E402
     ingest_uploaded_file,
 )
 from agent.logging_config import configure_logging  # noqa: E402
+from agent.observability import get_invoke_config  # noqa: E402
 from agent.retrieval.qdrant_store import list_sources  # noqa: E402
 from agent.schemas import Report  # noqa: E402
 
@@ -239,7 +240,9 @@ if submission:
             try:
                 with st.spinner("Retrieving, grading, and writing report..."):
                     graph = build_graph()
-                    result = graph.invoke({"question": question})
+                    result = graph.invoke(
+                        {"question": question}, config=get_invoke_config(source="streamlit")
+                    )
                 report = result["report"]
                 tool_calls = result.get("tool_calls_made", [])
                 loop_count = result.get("loop_count", 0)

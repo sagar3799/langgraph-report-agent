@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from agent.graph import build_graph  # noqa: E402
 from agent.logging_config import configure_logging  # noqa: E402
+from agent.observability import get_invoke_config  # noqa: E402
 
 QUESTIONS_PATH = Path(__file__).resolve().parent / "questions.json"
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -65,7 +66,10 @@ def main() -> None:
     for case in cases:
         print(f"Running {case['id']}: {case['question']}")
         try:
-            result = graph.invoke({"question": case["question"]})
+            trace_config = get_invoke_config(
+                source="eval", question_id=case["id"], category=case["category"]
+            )
+            result = graph.invoke({"question": case["question"]}, config=trace_config)
             row = score_case(case, result)
         except Exception as exc:  # a case failing outright is still a result worth recording
             row = {

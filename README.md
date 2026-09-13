@@ -161,8 +161,13 @@ src/agent/
   tools/           # calculator (AST-based, no eval()), web_search (DuckDuckGo)
   ingestion.py     # txt/md/pdf/pptx/docx -> extracted text -> chunks -> Qdrant
   app.py           # FastAPI: POST /ask
+  observability.py # optional Langfuse tracing, no-ops if LANGFUSE_PUBLIC_KEY isn't set
 streamlit_app.py   # chat UI: ask questions, attach files to grow the knowledge base
-scripts/ingest_docs.py  # bulk-ingest everything already in docs/
+scripts/ingest_docs.py     # bulk-ingest everything already in docs/
+scripts/prefetch_models.py # bakes embedding/reranker models into the Docker image at build time
+Dockerfile.api          # FastAPI service container
+Dockerfile.streamlit    # Streamlit UI container
+render.yaml             # Render Blueprint: provisions both services, secrets via dashboard
 uploads/           # gzip-compressed extracted text from chat uploads (gitignored)
 eval/
   questions.json   # 12 test questions (easy/hard/edge)
@@ -200,6 +205,49 @@ tests/             # pytest — mocks the LLM/network, no live API calls in CI
 - **API**: `uvicorn agent.app:app --reload` then `POST /ask {"question": "..."}`
 - **Tests**: `pytest`
 - **Eval**: `python eval/run_eval.py`
+
+## Deployment: two Docker services on Render, tracing via Langfuse
+
+The API and UI are deployed as **two separate services**, not one — they scale independently,
+and the API can be demoed alone (`curl`/Postman) without spinning up the whole chat interface.
+Both are plain Docker containers (`Dockerfile.api`, `Dockerfile.streamlit`), provisioned
+together from [`render.yaml`](render.yaml) as a Render Blueprint.
+
+**Why Render**: free tier genuinely requires no credit card (unlike GCP Cloud Run, Fly.io, or
+Railway, all of which gate free usage behind a card on file) — verified 2026-09-13. 750 free
+instance-hours/month, 15-minute spin-down when idle, real Docker support rather than a
+stripped-down runtime.
+
+**Why the models are baked into the image at build time**
+(`scripts/prefetch_models.py`, run during `docker build`): without this, the first request
+after every cold start would pay a ~350MB download on top of loading the models into memory.
+Baking them in at build time removes the *download* penalty; loading ~350MB of ONNX models
+into memory on a fresh cold start still takes a few seconds — that part doesn't go away, and
+it's worth being precise about which cost was actually eliminated.
+
+**Secrets**: never in the image or the repo. `render.yaml` declares each secret with
+`sync: false`, which tells Render to prompt for the actual value in its dashboard instead of
+reading it from the file — `GEMINI_API_KEY`, `QDRANT_API_KEY`, `QDRANT_URL`, and the Langfuse
+keys below are all handled this way.
+
+**Observability**: [`agent/observability.py`](src/agent/observability.py) wires in
+[Langfuse](https://langfuse.com) tracing (free tier, no card, 50K traces/month) across all
+three invocation sites (API, UI, eval harness) — request-level visibility into every LLM call,
+retrieval, and tool call, tagged with `source` (`api`/`streamlit`/`eval`) so runs can be
+filtered by which surface produced them. Unlike LangSmith, Langfuse's LangChain/LangGraph
+integration isn't purely env-var driven — it needs an explicit callback handler passed to
+`.invoke()`, which is what `get_invoke_config()` builds. It's a graceful no-op (returns `{}`)
+when `LANGFUSE_PUBLIC_KEY` isn't set, so local dev and tests never need a Langfuse account.
+This is separate from and complementary to the custom `state["trace"]` logging above — the
+trace panel shows *what the agent decided and why* in the UI itself; Langfuse shows *the raw
+request/token/latency data* in a dashboard, useful for debugging across many runs at once.
+
+```bash
+# add to .env / Render secrets to enable tracing (optional -- omit to run without it)
+LANGFUSE_PUBLIC_KEY=your-langfuse-public-key
+LANGFUSE_SECRET_KEY=your-langfuse-secret-key
+LANGFUSE_HOST=https://us.cloud.langfuse.com
+```
 
 ## A note on free-tier limits
 

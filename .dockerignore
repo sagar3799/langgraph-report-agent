@@ -1,0 +1,14 @@
+.venv/
+.git/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+uploads/
+qdrant_storage/
+.env
+.claude/
+.vscode/
+docs/
+eval/results/
