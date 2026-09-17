@@ -1,0 +1,12 @@
+[
+  {
+    "id": "aurora-overview",
+    "topic": "Aurora Cloud Storage: pricing, security, features, and limits",
+    "expected_keywords": ["$12", "AES-256", "SOC 2", "5 GB", "webhook"]
+  },
+  {
+    "id": "aurora-enterprise-buyer",
+    "topic": "What would an enterprise customer need to know about Aurora Cloud Storage before signing a contract?",
+    "expected_keywords": ["12-month", "SSO", "99.95%", "DPA"]
+  }
+]

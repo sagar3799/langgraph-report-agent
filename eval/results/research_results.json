@@ -1,0 +1,34 @@
+[
+  {
+    "id": "aurora-overview",
+    "topic": "Aurora Cloud Storage: pricing, security, features, and limits",
+    "passed": true,
+    "confidence": "high",
+    "critic_accepted": true,
+    "keyword_coverage": 0.8,
+    "keywords_matched": "$12,AES-256,SOC 2,5 GB",
+    "keywords_missed": "webhook",
+    "section_completeness": 1.0,
+    "sections_planned": 4,
+    "sections_written": 4,
+    "citation_coverage": 0.96,
+    "retrieval_precision": 0.62,
+    "latency_seconds": 99.6
+  },
+  {
+    "id": "aurora-enterprise-buyer",
+    "topic": "What would an enterprise customer need to know about Aurora Cloud Storage before signing a contract?",
+    "passed": true,
+    "confidence": "low",
+    "critic_accepted": true,
+    "keyword_coverage": 1.0,
+    "keywords_matched": "12-month,SSO,99.95%,DPA",
+    "keywords_missed": "none",
+    "section_completeness": 1.0,
+    "sections_planned": 5,
+    "sections_written": 5,
+    "citation_coverage": 1.0,
+    "retrieval_precision": 0.4,
+    "latency_seconds": 108.5
+  }
+]
