@@ -1,7 +1,7 @@
 [project]
-name = "langgraph-report-agent"
+name = "researchgraph"
 version = "0.1.0"
-description = "LangGraph agent with conditional retrieval, tool-calling, and an automated evaluation pipeline."
+description = "Self-evaluating multi-agent LangGraph research system: planner, per-section retrieval, evidence verification, self-critique, and human-in-the-loop review."
 requires-python = ">=3.11"
 dependencies = [
     "langgraph>=0.2.0",

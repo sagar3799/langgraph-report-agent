@@ -7,6 +7,7 @@ the standard fix for "vector search alone isn't precise enough."
 """
 
 import logging
+import math
 import os
 import time
 import uuid
@@ -29,6 +30,12 @@ RETRIEVE_CANDIDATES = 15  # widen the net before reranking down to top_k
 
 _embedder: TextEmbedding | None = None
 _reranker: TextCrossEncoder | None = None
+
+
+def _sigmoid(x: float) -> float:
+    """Squash an unbounded cross-encoder score into [0,1] -- a heuristic confidence signal,
+    not a calibrated probability (raw scores run roughly -10 to +7 in testing)."""
+    return 1.0 / (1.0 + math.exp(-x))
 
 
 def get_qdrant_client() -> QdrantClient:
@@ -150,44 +157,81 @@ def list_sources() -> list[str]:
     return sorted(sources)
 
 
-def search(query: str, top_k: int = 4) -> list[dict]:
-    """Vector search for RETRIEVE_CANDIDATES, then rerank down to top_k with a cross-encoder."""
+def search(query: str, top_k: int = 4, extra_candidates: list[dict] | None = None) -> list[dict]:
+    """Vector search for RETRIEVE_CANDIDATES, merge in `extra_candidates`, then rerank down to
+    top_k with a cross-encoder.
+
+    `extra_candidates` (each needs "id", "text", "source") lets a caller fold in chunks already
+    retrieved elsewhere in the same run -- e.g. a multi-section research run's shared evidence
+    pool -- so they compete fairly for the top_k slots instead of triggering a second, separate
+    reranking. Candidates already present in the fresh Qdrant hits (same id) aren't duplicated.
+    """
     client = get_qdrant_client()
     collection = get_collection_name()
+
+    ids: list[str] = []
+    texts: list[str] = []
+    sources: list[str] = []
+
     if not client.collection_exists(collection):
-        logger.warning("Collection '%s' doesn't exist yet — returning no results", collection)
-        return []
+        logger.warning(
+            "Collection '%s' doesn't exist yet — using only extra candidates", collection
+        )
+    else:
+        logger.info("Embedding query locally: %r", query)
+        embedder = get_embedder()
+        t0 = time.monotonic()
+        query_vector = next(iter(embedder.query_embed(query))).tolist()
+        logger.info("  query embedded in %.2fs", time.monotonic() - t0)
 
-    logger.info("Embedding query locally: %r", query)
-    embedder = get_embedder()
-    t0 = time.monotonic()
-    query_vector = next(iter(embedder.query_embed(query))).tolist()
-    logger.info("  query embedded in %.2fs", time.monotonic() - t0)
+        t0 = time.monotonic()
+        hits = client.query_points(
+            collection_name=collection, query=query_vector, limit=RETRIEVE_CANDIDATES
+        ).points
+        logger.info(
+            "Qdrant vector search: %d candidate(s) from '%s' in %.2fs",
+            len(hits), collection, time.monotonic() - t0,
+        )
+        ids = [str(hit.id) for hit in hits]
+        texts = [hit.payload["text"] for hit in hits]
+        sources = [hit.payload["source"] for hit in hits]
 
-    t0 = time.monotonic()
-    hits = client.query_points(
-        collection_name=collection, query=query_vector, limit=RETRIEVE_CANDIDATES
-    ).points
-    logger.info(
-        "Qdrant vector search: %d candidate(s) from '%s' in %.2fs",
-        len(hits), collection, time.monotonic() - t0,
-    )
-    if not hits:
+    seen_ids = set(ids)
+    merged_from_memory = 0
+    for cand in extra_candidates or []:
+        if cand["id"] in seen_ids:
+            continue
+        ids.append(cand["id"])
+        texts.append(cand["text"])
+        sources.append(cand["source"])
+        seen_ids.add(cand["id"])
+        merged_from_memory += 1
+    if merged_from_memory:
+        logger.info("Merged %d candidate(s) from shared research memory", merged_from_memory)
+
+    if not texts:
         return []
 
     t0 = time.monotonic()
     reranker = get_reranker()
-    texts = [hit.payload["text"] for hit in hits]
     scores = reranker.rerank(query, texts)
 
-    reranked = sorted(zip(hits, scores, strict=True), key=lambda pair: pair[1], reverse=True)
+    reranked = sorted(
+        zip(ids, texts, sources, scores, strict=True), key=lambda row: row[3], reverse=True
+    )
     logger.info(
         "Reranked %d candidates in %.2fs, keeping top %d (scores: %s)",
-        len(hits), time.monotonic() - t0, top_k,
-        [round(float(s), 2) for _, s in reranked[:top_k]],
+        len(texts), time.monotonic() - t0, top_k,
+        [round(float(s), 2) for *_, s in reranked[:top_k]],
     )
 
     return [
-        {"text": hit.payload["text"], "source": hit.payload["source"], "score": float(score)}
-        for hit, score in reranked[:top_k]
+        {
+            "id": doc_id,
+            "text": text,
+            "source": source,
+            "score": float(score),
+            "normalized_confidence": _sigmoid(float(score)),
+        }
+        for doc_id, text, source, score in reranked[:top_k]
     ]
